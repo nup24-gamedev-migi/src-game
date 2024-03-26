@@ -12,15 +12,20 @@ import com.badlogic.gdx.graphics.g3d.Material;
 import com.badlogic.gdx.graphics.g3d.Model;
 import com.badlogic.gdx.graphics.g3d.ModelBatch;
 import com.badlogic.gdx.graphics.g3d.ModelInstance;
+import com.badlogic.gdx.graphics.g3d.attributes.BlendingAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.ColorAttribute;
 import com.badlogic.gdx.graphics.g3d.attributes.TextureAttribute;
 import com.badlogic.gdx.graphics.g3d.decals.CameraGroupStrategy;
 import com.badlogic.gdx.graphics.g3d.decals.Decal;
 import com.badlogic.gdx.graphics.g3d.decals.DecalBatch;
+import com.badlogic.gdx.graphics.g3d.utils.MeshPartBuilder;
 import com.badlogic.gdx.graphics.g3d.utils.ModelBuilder;
 import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
 import com.badlogic.gdx.math.Vector3;
 
+import java.util.Collection;
+import java.util.List;
+import java.util.Random;
 import java.util.stream.IntStream;
 
 public class View {
@@ -38,6 +43,8 @@ public class View {
     private final Model leftWall;
     private final Model rightWall;
     private final Model backWall;
+    private final Model shadowModel;
+    private final ModelInstance shadowInstance;
     private final ModelInstance leftWallInstance;
     private final ModelInstance rightWallInstance;
     private final ModelInstance backWallInstance;
@@ -57,7 +64,7 @@ public class View {
         wall = new Texture("wall.png");
         debugRenderer =  new ShapeRenderer();
         batch = new SpriteBatch();
-        shadow = new Texture("shadow-2.png");
+        shadow = new Texture("shadow4.png");
         chest = new Texture("chest-2.png");
 
         modelBatch = new ModelBatch();
@@ -113,6 +120,24 @@ public class View {
         backWallInstance = new ModelInstance(backWall);
 
         decalBatch = new DecalBatch(10, new CameraGroupStrategy(cam));
+
+        shadowModel = buildShadow(List.of(
+                new Logic.Pos(0, 1),
+                new Logic.Pos(0, 2),
+                new Logic.Pos(0, 3),
+                new Logic.Pos(1, 3),
+                new Logic.Pos(2, 3),
+                new Logic.Pos(2, 2),
+                new Logic.Pos(2, 1),
+                new Logic.Pos(3, 1),
+                new Logic.Pos(4, 1),
+                new Logic.Pos(5, 1),
+                new Logic.Pos(5, 2),
+                new Logic.Pos(5, 3),
+                new Logic.Pos(6, 3),
+                new Logic.Pos(6, 4)
+        ), shadow);
+        shadowInstance = new ModelInstance(shadowModel);
     }
 
     public void view(final Logic model) {
@@ -121,13 +146,14 @@ public class View {
         Gdx.gl.glViewport(0, 0, Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT | GL20.GL_DEPTH_BUFFER_BIT);
 
+        drawField(model);
+
         modelBatch.begin(cam);
         modelBatch.render(leftWallInstance);
         modelBatch.render(rightWallInstance);
         modelBatch.render(backWallInstance);
+        modelBatch.render(shadowInstance);
         modelBatch.end();
-
-        drawField(model);
 
         model.allThings().forEach(entry -> {
             final Logic.Pos lPos = entry.getKey();
@@ -163,6 +189,63 @@ public class View {
         decalBatch.flush();
     }
 
+    private static Vector3 shadowWiggle(final Random rand) {
+        return new Vector3(
+                0.10f * sizeOfBlock / 2 * rand.nextFloat(-1, 1),
+                0,
+                0.10f * sizeOfBlock / 2 * rand.nextFloat(-1, 1)
+        );
+    }
+
+    private static Model buildShadow(final Collection<Logic.Pos> points, final Texture shadow) {
+        final ModelBuilder builder = new ModelBuilder();
+        builder.begin();
+
+        final MeshPartBuilder modelBuilder = builder.part(
+                "line",
+                GL20.GL_TRIANGLES,
+                Usage.Position | Usage.TextureCoordinates,
+                new Material(
+                        new BlendingAttribute(true, 1),
+//                        ColorAttribute.createDiffuse(Color.BLACK)
+                        TextureAttribute.createDiffuse(new TextureRegion(shadow))
+                )
+        );
+
+        final Random rand = new Random();
+        Vector3 prev = logicToDisplay(new Logic.Pos(0, 0))
+                .add(sizeOfBlock / 2, -0.99f, sizeOfBlock / 2);
+        for (final Logic.Pos pos : points) {
+            final Vector3 end = logicToDisplay(pos)
+                    .add(sizeOfBlock / 2, -0.99f, sizeOfBlock / 2);
+            final Vector3 dir = end.cpy().sub(prev).nor();
+            final Vector3 perpNo = new Vector3(dir.z, 0, -dir.x);
+            final Vector3 perp = new Vector3(dir.z, 0, -dir.x)
+                    .scl(sizeOfBlock / 2);
+            final Vector3 ranoff = dir.cpy().scl(0.3f * sizeOfBlock / 2 * rand.nextFloat(0.2f, 1))
+                    .add(perpNo.scl( sizeOfBlock / 2 * (
+                            (0.3f * rand.nextFloat(0, 1) + 0.2f) *
+                                    (rand.nextBoolean() ? -1 : 1)
+                    )));
+            final Vector3 off = dir.cpy().scl(sizeOfBlock / 2 * 0.2f);
+            final Vector3 visend = end.cpy().add(ranoff);
+
+//            modelBuilder.line(prev, end);
+            modelBuilder.rect(
+                    prev.cpy().add(perp.cpy().scl(0.35f)).add(shadowWiggle(rand)),
+                    prev.cpy().sub(perp.cpy().scl(0.35f)).add(shadowWiggle(rand)),
+                    visend.cpy().add(off).sub(perp.cpy().scl(0.45f)).add(shadowWiggle(rand)),
+                    visend.cpy().add(off).add(perp.cpy().scl(0.45f)).add(shadowWiggle(rand)),
+                    Vector3.Y
+            );
+
+//            prev = end;
+            prev = visend;
+        }
+
+        return builder.end();
+    }
+
     private void drawField(final Logic logic) {
         for (int y = 0; y < logic.getFieldHeight(); y++) {
             for (int x = 0; x < logic.getFieldWidth(); x++) {
@@ -177,9 +260,10 @@ public class View {
                 decalBatch.add(dec);
             }
         }
+        decalBatch.flush();
     }
 
-    public Vector3 logicToDisplay(
+    public static Vector3 logicToDisplay(
             final Logic.Pos lPos
     ) {
         return new Vector3(
@@ -197,5 +281,6 @@ public class View {
         leftWall.dispose();
         rightWall.dispose();
         backWall.dispose();
+        shadowModel.dispose();
     }
 }
